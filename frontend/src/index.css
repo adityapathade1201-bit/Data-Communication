@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html, body, #root { height: 100%; }
+body { @apply bg-ink-900 text-slate-200 font-sans antialiased; margin: 0; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #223250; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@layer components {
+  .card { @apply rounded-xl border border-ink-600/70 bg-ink-800/90; }
+  .card-h { @apply flex items-center justify-between gap-2 px-3.5 pt-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400; }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-ink-500 bg-ink-700 px-3 py-1.5 text-sm font-medium text-slate-100 transition hover:bg-ink-600 disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn-primary { @apply border-pulse-deep bg-pulse-deep text-white hover:bg-pulse; }
+  .btn-sm { @apply px-2 py-1 text-xs; }
+  .input { @apply w-full rounded-md border border-ink-500 bg-ink-900 px-2 py-1 text-sm text-slate-100 outline-none focus:border-pulse; }
+  .lbl { @apply mb-0.5 block text-[11px] text-slate-400; }
+  .chip { @apply inline-flex items-center rounded-full border border-ink-500 px-2 py-0.5 text-[11px] text-slate-300; }
+}
