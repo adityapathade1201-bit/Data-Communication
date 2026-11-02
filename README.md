@@ -122,6 +122,7 @@ curl -s -X POST localhost:8000/api/experiments/run -H 'content-type: application
 - Jain's index uses raw average throughput per flow. Delay is one-way delay of data packets. Flow loss % = data packets dropped / data packets sent (retransmissions included). Link utilization is busy-time based (includes ACKs) and therefore never exceeds 100 %.
 - RED's default EWMA weight is 0.02 (faster than the classic 0.002) so it reacts within short runs.
 - Priority queueing is strict: the lowest class can starve (visible as high p95 delay in experiment C-PRIO) — that trade-off is intended to be shown.
+<<<<<<< HEAD
 - Pure-Python engine: 20 s of ~15 Mbps traffic simulates in well under a second (TCP-heavy presets take a few seconds); the leaf-spine/campus presets are scaled-down (Mbps, not Gbps). The live view samples at most 250 in-flight packets per frame.
 - One WebSocket run per connection; no authentication (hackathon scope). Run history is stored as JSON files and never pruned.
 
@@ -151,3 +152,5 @@ backend/  app/{main,schemas,service,storage}.py  app/sim/{engine,queues,config,a
 frontend/ src/{App,useSimulation,api,lib,types}.ts(x)  src/components/*.tsx
 run.sh  run.bat  docker-compose.yml
 ```
+=======
+>>>>>>> 20658d8ad6317aab4c157b09b2586acad296a1c9
