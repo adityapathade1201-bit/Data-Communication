@@ -101,3 +101,55 @@ def test_websocket_rejects_invalid_config(client):
     with client.websocket_connect("/ws") as ws:
         ws.send_json({"action": "start", "config": {"nodes": [{"id": "A"}], "flows": [{"id": "f", "src": "A", "dst": "Z"}]}})
         assert ws.receive_json()["type"] == "error"
+
+
+def test_seven_sender_topology_is_accepted_and_simulated(client):
+    cfg = get_preset("three-sender")
+    base_link = next(link for link in cfg["links"] if link["a"] == "A" and link["b"] == "R1")
+    template_flow = cfg["flows"][-1]
+    for index in range(4, 8):
+        host_id = f"NP_SENDER_{index}"
+        cfg["nodes"].append({
+            "id": host_id, "type": "host", "label": f"Sender {index}",
+            "x": 170 + (index - 4) * 80, "y": 50 + (index - 4) * 90,
+        })
+        cfg["links"].append({**base_link, "id": f"NP_L{index}", "a": host_id, "b": "R1"})
+        cfg["flows"].append({
+            **template_flow, "id": f"f{index}", "src": host_id,
+            "label": f"Sender {index} (4 Mbps)",
+        })
+
+    response = client.post("/api/simulate", json={"config": cfg, "include_frames": False})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["summary"]["flows"]) == 7
+    assert {flow["src"] for flow in body["config"]["flows"]} == {
+        "A", "B", "C", "NP_SENDER_4", "NP_SENDER_5", "NP_SENDER_6", "NP_SENDER_7"
+    }
+
+
+def test_vercel_storage_uses_writable_tmp(monkeypatch, tmp_path):
+    monkeypatch.delenv("NETPULSE_DATA", raising=False)
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setenv("NETPULSE_DATA", "/read-only/deployed/path")
+    assert storage._default_data_dir() == tmp_path / "netpulse-data"
+
+
+def test_websocket_reports_storage_failure_instead_of_dropping_connection(client, monkeypatch):
+    def fail_save(_result):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(storage, "save_run", fail_save)
+    cfg = short_cfg()
+    cfg["duration_s"] = 0.5
+    with client.websocket_connect("/ws/simulate") as ws:
+        ws.send_json({"action": "start", "config": cfg, "speed": 50})
+        messages = []
+        while True:
+            message = ws.receive_json()
+            messages.append(message)
+            if message["type"] == "error":
+                break
+        assert messages[0]["type"] == "started"
+        assert messages[-1]["message"] == "Backend simulation failed: OSError: read-only file system"
