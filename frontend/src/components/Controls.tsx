@@ -25,24 +25,93 @@ export default function Controls({ config, onChange, speed, onSpeed, selected, o
   const rateFlows = config.flows.filter((f) => f.kind !== 'tcp')
   const avgRate = rateFlows.length ? rateFlows.reduce((s, f) => s + f.rate_mbps, 0) / rateFlows.length : 0
   const first = config.flows[0]
+  const senderCount = new Set(config.flows.map((f) => f.src)).size
 
+  // The sender count controls visible host nodes as well as traffic flows.
+  // Previously it only cloned flows, so the UI could show 7 flows but still
+  // display only the original 3 sender hosts.
   const setCount = (n: number) => edit((c) => {
-    const hosts = c.nodes.filter((x) => x.type === 'host')
-    while (c.flows.length < n && hosts.length >= 2) {
-      const t = c.flows[c.flows.length - 1]
-      const id = uid('f', c.flows.map((f) => f.id))
-      c.flows.push(t ? { ...t, id, label: `Flow ${c.flows.length + 1}` }
-        : { id, src: hosts[0].id, dst: hosts[hosts.length - 1].id, kind: 'cbr', rate_mbps: 4, packet_size: 1000, priority: 1,
-            burstiness: 4, burst_on_ms: 100, tcp_variant: 'reno', label: 'Flow 1' })
+    const sources = [...new Set(c.flows.map((f) => f.src))]
+    const sourceNodes = sources
+      .map((id) => c.nodes.find((node) => node.id === id))
+      .filter((node): node is NonNullable<typeof node> => Boolean(node && node.type === 'host'))
+
+    if (n < sources.length) {
+      const removed = new Set(sources.slice(n))
+      c.flows = c.flows.filter((flow) => !removed.has(flow.src))
+      const stillReferenced = new Set(c.flows.flatMap((flow) => [flow.src, flow.dst]))
+      for (const id of removed) {
+        if (!stillReferenced.has(id)) {
+          c.nodes = c.nodes.filter((node) => node.id !== id)
+          c.links = c.links.filter((link) => link.a !== id && link.b !== id)
+        }
+      }
+      return
     }
-    while (c.flows.length > n && c.flows.length > 0) c.flows.pop()
+
+    if (n <= sources.length) return
+
+    const template = c.flows[c.flows.length - 1] ?? c.flows[0]
+    const destination = template?.dst ?? c.nodes.find((node) => node.type === 'host' && !sources.includes(node.id))?.id
+    const primarySource = sources[0]
+    const primaryLink = c.links.find((link) =>
+      (link.a === primarySource && c.nodes.find((node) => node.id === link.b)?.type === 'router') ||
+      (link.b === primarySource && c.nodes.find((node) => node.id === link.a)?.type === 'router'),
+    )
+    const routerId = primaryLink
+      ? (primaryLink.a === primarySource ? primaryLink.b : primaryLink.a)
+      : c.nodes.find((node) => node.type === 'router')?.id
+    const router = c.nodes.find((node) => node.id === routerId)
+
+    // A sender needs a reachable destination and a router/access node.
+    if (!destination || !router) return
+
+    const baseX = sourceNodes.length ? Math.min(...sourceNodes.map((node) => node.x)) : 90
+    const rows = [50, 115, 180, 245, 310, 375, 440, 505]
+    const columns = [baseX + 80, baseX + 160, baseX + 240, baseX, Math.max(45, baseX - 80)]
+    const pickPosition = () => {
+      let best: { x: number; y: number; score: number } | null = null
+      for (const x of columns) {
+        if (x < 35 || x > 820) continue
+        for (const y of rows) {
+          const nearest = Math.min(...c.nodes.map((node) => Math.hypot(node.x - x, node.y - y)))
+          if (nearest < 66) continue
+          const score = Math.abs(x - (baseX + 80)) + Math.abs(y - router.y) * 0.12
+          if (!best || score < best.score) best = { x, y, score }
+        }
+      }
+      if (best) return { x: best.x, y: best.y }
+      const index = c.nodes.filter((node) => node.type === 'host').length
+      return { x: Math.min(760, baseX + 160), y: 45 + (index % 7) * 75 }
+    }
+
+    for (let index = sources.length; index < n; index++) {
+      const number = index + 1
+      const nodeId = uid('NP_SENDER_', c.nodes.map((node) => node.id))
+      const position = pickPosition()
+      c.nodes.push({ id: nodeId, type: 'host', label: `Sender ${number}`, ...position })
+
+      const linkId = uid('NP_L', c.links.map((link) => link.id))
+      const link = primaryLink
+        ? { ...primaryLink, id: linkId, a: nodeId, b: router.id }
+        : { id: linkId, a: nodeId, b: router.id, bandwidth_mbps: 100, delay_ms: 2, buffer_pkts: 100,
+            loss_prob: 0, queue_policy: 'droptail' as const }
+      c.links.push(link)
+
+      const flowId = uid('f', c.flows.map((flow) => flow.id))
+      const flow: FlowCfg = template
+        ? { ...template, id: flowId, src: nodeId, dst: destination, label: `Sender ${number} (${template.rate_mbps} Mbps)` }
+        : { id: flowId, src: nodeId, dst: destination, kind: 'cbr', rate_mbps: 4, packet_size: 1000, priority: 1,
+            burstiness: 4, burst_on_ms: 100, tcp_variant: 'reno', label: `Sender ${number}` }
+      c.flows.push(flow)
+    }
   })
 
   return (
     <div className="space-y-3">
       <Section title="Traffic">
         <div className="grid grid-cols-2 gap-2">
-          <Num label="Number of flows" value={config.flows.length} min={0} max={12} onChange={(v) => setCount(Math.max(0, Math.min(12, Math.round(v))))} />
+          <Num label="Number of senders" value={senderCount} min={0} max={12} onChange={(v) => setCount(Math.max(0, Math.min(12, Math.round(v))))} />
           <Num label="Rate per flow" unit="Mbps" value={+avgRate.toFixed(2)} min={0.1} step={0.5}
             onChange={(v) => edit((c) => { c.flows.forEach((f) => { if (f.kind !== 'tcp') f.rate_mbps = Math.max(0.1, v) }) })} />
           <Num label="Packet size" unit="bytes" value={first?.packet_size ?? 1000} min={64} max={9000} step={100} onChange={(v) => setAll('packet_size', Math.round(v))} />
@@ -54,6 +123,7 @@ export default function Controls({ config, onChange, speed, onSpeed, selected, o
             options={[{ value: 'reno', label: 'Reno' }, { value: 'cubic', label: 'CUBIC' }]}
             onChange={(v) => edit((c) => { c.flows.forEach((f) => { f.tcp_variant = v }) })} />
         </div>
+        <p className="mt-2 text-[11px] text-slate-500">Each sender is shown as a separate host connected to the router.</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {config.flows.map((f) => (
             <button key={f.id} className={`chip hover:border-pulse ${selected?.kind === 'flow' && selected.id === f.id ? 'border-pulse text-pulse-soft' : ''}`}
