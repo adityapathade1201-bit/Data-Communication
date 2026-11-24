@@ -8,7 +8,23 @@ import time
 import uuid
 from pathlib import Path
 
-DATA_DIR = Path(os.environ.get("NETPULSE_DATA", Path(__file__).resolve().parents[1] / "data"))
+def _default_data_dir() -> Path:
+    """Choose writable storage in serverless deployments.
+
+    Vercel Functions have a read-only deployed filesystem; /tmp is writable
+    scratch storage. It is ephemeral, so long-term persistence needs an
+    external database or object store.
+    """
+    if os.environ.get("VERCEL") == "1":
+        # Prefer writable serverless scratch storage over a local development path.
+        return Path(os.environ.get("TMPDIR", "/tmp")) / "netpulse-data"
+    configured = os.environ.get("NETPULSE_DATA")
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[1] / "data"
+
+
+DATA_DIR = _default_data_dir()
 SAFE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
