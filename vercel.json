@@ -5,7 +5,6 @@
       "root": "backend",
       "framework": "fastapi",
       "entrypoint": "app.main:app",
-      "maxDuration": 60
     },
     "frontend": {
       "root": "frontend",
