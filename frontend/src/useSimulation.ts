@@ -35,6 +35,7 @@ export function useSimulation() {
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<number | undefined>(undefined)
   const doneRef = useRef(false)
+  const restFallbackRef = useRef(false)
   const durationRef = useRef(1)
 
   const stopTimers = useCallback(() => {
@@ -59,6 +60,7 @@ export function useSimulation() {
     frameRef.current = null
     framesRef.current = []
     doneRef.current = false
+    restFallbackRef.current = false
   }, [])
 
   const reset = useCallback(() => {
@@ -105,10 +107,41 @@ export function useSimulation() {
         setError(String(m.message)); setStatus('error'); closeWs()
       }
     }
-    ws.onerror = () => { setError('Could not reach the simulation backend over WebSocket. Is it running on port 8000?'); setStatus('error') }
-    ws.onclose = () => {
-      if (!doneRef.current) { setError((e) => e ?? 'Connection to the backend was lost.'); setStatus('error') }
+    const fallbackToRest = () => {
+      if (doneRef.current || restFallbackRef.current) return
+      restFallbackRef.current = true
+      closeWs()
+      setBusy(true)
+      setStatus('connecting')
+      setError('Live connection interrupted. Retrying this simulation through the standard API…')
+
+      // Hosted WebSocket connections can close at serverless duration limits.
+      // Retry the same configuration through REST so the user can still receive
+      // a completed run and replay frames when the HTTP execution path is available.
+      post<RunResult>('/api/simulate', { config, include_frames: true })
+        .then((r) => {
+          framesRef.current = r.frames ?? []
+          frameRef.current = framesRef.current[framesRef.current.length - 1] ?? null
+          setSamples(r.samples)
+          setEvents(r.events)
+          setMarkers(r.markers)
+          setSummary(r.summary)
+          setRunId(r.run_id)
+          setUsedConfig(r.config)
+          setProgress(1)
+          setStatus('done')
+          setError(null)
+        })
+        .catch((e) => {
+          const detail = e instanceof Error ? e.message : String(e)
+          setError(`Live connection failed and REST retry also failed: ${detail}`)
+          setStatus('error')
+        })
+        .finally(() => setBusy(false))
     }
+
+    ws.onerror = fallbackToRest
+    ws.onclose = fallbackToRest
   }, [stopTimers, closeWs, clearData])
 
   const send = useCallback((msg: unknown) => {
