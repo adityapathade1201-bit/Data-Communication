@@ -42,7 +42,7 @@ def _wrap(fn, *a, **kw):
         raise HTTPException(404, f"not found: {e.args[0]}")
 
 
-# ---------------------------------------------------------------------------- REST
+# ----------------------------------------------------------------------------- REST
 @app.get("/api/health")
 def health():
     return {"status": "ok", "service": "netpulse", "version": app.version}
@@ -56,62 +56,58 @@ def presets():
 @app.post("/api/simulate")
 def simulate(req: SimulateRequest):
     cfg = _cfg(req.config, req.preset)
-    sim = Simulator(cfg)
-    result = sim.run()
-    run_id = storage.save_run(result)
-    if not req.include_frames:
-        result.pop("frames", None)
-    result["run_id"] = run_id
-    result["config"] = cfg
-    return result
+    return _wrap(service.simulate, cfg, req.include_frames, req.frame_dt)
 
 
 @app.post("/api/experiments/run")
-def experiments(req: ExperimentRequest):
+def experiments_run(req: ExperimentRequest):
     cfg = _cfg(req.config, req.preset)
-    return _wrap(service.run_experiments, cfg, req.raised_bandwidth_mbps, req.bottleneck_link, req.policies)
-
-
-@app.post("/api/advisor")
-def advisor(req: AdvisorRequest):
-    cfg = _cfg(req.config, req.preset)
-    return _wrap(service.advisor, cfg, req.apply)
+    return _wrap(service.experiments, cfg, req.raised_bandwidth_mbps, req.bottleneck_link, req.policies)
 
 
 @app.post("/api/tcp-lab")
 def tcp_lab(req: TcpLabRequest):
-    return _wrap(service.tcp_lab, req.model_dump())
+    return _wrap(service.tcp_lab, bandwidth_mbps=req.bandwidth_mbps, delay_ms=req.delay_ms,
+                 buffer_pkts=req.buffer_pkts, flows=req.flows, duration_s=req.duration_s, seed=req.seed,
+                 policy=req.queue_policy)
+
+
+@app.post("/api/advisor")
+def advisor(req: AdvisorRequest):
+    cfg = _cfg(req.config, req.preset or "three-sender")
+    return _wrap(service.advisor, cfg, req.apply)
 
 
 @app.get("/api/scenarios")
-def scenarios():
+def scenarios_list():
     return storage.list_scenarios()
 
 
 @app.post("/api/scenarios")
-def save_scenario(req: ScenarioSave):
+def scenarios_save(req: ScenarioSave):
     return storage.save_scenario(req.name, req.config.to_dict())
 
 
 @app.get("/api/scenarios/{sid}")
-def load_scenario(sid: str):
+def scenarios_get(sid: str):
     return _wrap(storage.load_scenario, sid)
 
 
 @app.delete("/api/scenarios/{sid}")
-def delete_scenario(sid: str):
+def scenarios_delete(sid: str):
     _wrap(storage.delete_scenario, sid)
     return {"deleted": sid}
 
 
+@app.get("/api/runs/{run_id}")
+def runs_get(run_id: str):
+    return _wrap(storage.load_run, run_id)
+
+
 @app.get("/api/export/{run_id}")
-def export(run_id: str, format: str = Query("csv", pattern="^(csv|json)$")):
-    result = _wrap(storage.load_run, run_id)
-    if format == "json":
-        import json
-        return Response(json.dumps(result), media_type="application/json")
-    return Response(service.export_csv(result), media_type="text/csv",
-                    headers={"Content-Disposition": f'attachment; filename="{run_id}.csv"'})
+def export(run_id: str, format: str = Query("json", pattern="^(csv|json)$")):
+    body, media, name = _wrap(service.export_run, run_id, format)
+    return Response(content=body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 # ----------------------------------------------------------------------------- WebSocket
