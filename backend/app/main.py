@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from .schemas import (AdvisorRequest, ExperimentRequest, ScenarioSave, SimConfig
                       TcpLabRequest)
 from .sim.config import ConfigError
 from .sim.engine import Simulator
+
+logger = logging.getLogger("netpulse")
 
 app = FastAPI(title="NetPulse — Network Congestion & Traffic Simulator", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -182,6 +185,18 @@ async def ws_simulate(ws: WebSocket):
                 await ws.send_json({"type": "done", "run_id": run_id, "summary": result["summary"], **tail})
     except (WebSocketDisconnect, RuntimeError):
         pass
+    except Exception as exc:
+        # Do not silently close the socket when a runtime/storage problem occurs.
+        # The frontend can now show the real backend error instead of the generic
+        # "Connection to the backend was lost" message.
+        logger.exception("Unhandled WebSocket simulation failure")
+        try:
+            await ws.send_json({
+                "type": "error",
+                "message": f"Backend simulation failed: {type(exc).__name__}: {exc}",
+            })
+        except Exception:
+            pass
     finally:
         reader_task.cancel()
 
